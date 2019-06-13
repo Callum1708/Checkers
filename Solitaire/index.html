@@ -1,0 +1,653 @@
+<html>
+    <head>
+        <title>Single Player Checkers</title>
+        <style>
+            body {
+                background-color: lightgray;
+            }
+            table {
+                background-color: yellow;
+                margin: 0 auto;
+            }
+            td {
+                width: 80px;
+                height: 80px;
+            }
+            select, input {
+                width: 100%;
+            }
+            form {
+                width: 200px;
+                margin: 0 auto;
+            }
+            .button {
+                width: 200px;
+                margin: 0 auto;
+            }
+            button {
+                width: 100%;
+            }
+        </style>
+    </head>
+    <body>
+
+        <form name="form1" method="post">
+            <select name="tableSize" onchange="changeGridSize(this.value)">
+                <option selected="" value="8">8x8 Table</option>
+                <option value="10">10x10 Table</option>
+                <option value="12">12x12 Table</option>
+            </select>
+        </form>
+
+        <form name="form2" method="post">
+            <select name="rowsPerPlayer" onchange="changeRowsPerPlayer(this.value)">
+                <option value="1">1 row of pieces per player</option>
+                <option value="2">2 rows of pieces per player</option>
+                <option selected="" value="3">3 rows of pieces per player</option>
+                <option value="4">4 rows of pieces per player</option>
+                <option value="5">5 rows of pieces per player</option>
+            </select>
+        </form>
+
+        <form name="form3" method="post">
+            <select name="difficulty" onchange="changeDifficulty(this.value)">
+                <option value="1">Easy</option>
+                <option value="2">Normal</option>
+                <option value="3">Expert</option>
+            </select>
+
+        </form>
+
+        <div class="button">
+            <button onclick="simRound()">Start Game</button>
+        </div>
+
+        <table id="mainTable"></table>
+
+        <script>
+
+            var gridSize = 8;
+            var linesOfPiecesPerPlayer = 3;
+            var difficulty = 1;
+            var max_depth = 3;
+            var forceJump = true;
+
+            var round = 1;
+            var playerPieces = [];
+            var computerPieces = [];
+            var selectionHelpers = [];
+            var grid = [];
+            var playerTurn = true;
+
+            gameTable = document.getElementById('mainTable');
+            gridInit(gameTable);
+
+            function changeGridSize(size) {
+                gridSize = size;
+                gameTable.innerHTML = '';
+                playerPieces = [];
+                computerPieces = [];
+                grid = [];
+                gridInit(gameTable);
+            }
+
+            function changeRowsPerPlayer(numOfRows) {
+                linesOfPiecesPerPlayer = numOfRows;
+                gameTable.innerHTML = '';
+                playerPieces = [];
+                computerPieces = [];
+                grid = [];
+                gridInit(gameTable);
+            }
+
+            function changeDifficulty(value) {
+                difficulty = value;
+            }
+
+            function gridInit(gameTable) {
+                for (i = 0; i < gridSize; i++) {
+                    var row = document.createElement("tr");
+                    gameTable.appendChild(row);
+                    grid[i] = [];
+                    for (j = 0; j < gridSize; j++) {
+                        grid[i][j] = {VPos: i, HPos: j, DOM: null, Type: null, isKing: false}
+                        var cell = document.createElement("td");
+                        if (j % 2 == 0 && i < linesOfPiecesPerPlayer) {
+                            if (i % 2 == 0) {
+                                cell.setAttribute("bgcolor", "red");
+                                circle = generatePieceDOM("blue", false);
+                                computerPieces.push({VPos: i, HPos: j, DOM: circle, isKing: false});
+                                grid[i][j].Type = "computer";
+                                grid[i][j].DOM = circle;
+                                cell.appendChild(circle);
+                            } else {
+                                cell.setAttribute("bgcolor", "black");
+                            }
+                        } else if (i < linesOfPiecesPerPlayer){
+                            if (i % 2 != 0) {
+                                cell.setAttribute("bgcolor", "red");
+                                circle = generatePieceDOM("blue", false);
+                                computerPieces.push({VPos: i, HPos: j, DOM: circle, isKing: false});
+                                grid[i][j].Type = "computer";
+                                grid[i][j].DOM = circle;
+                                cell.appendChild(circle);
+                            } else {
+                                cell.setAttribute("bgcolor", "black");
+                            }
+                        } else if (j % 2 == 0 && i >= gridSize - linesOfPiecesPerPlayer) {
+                            if (i % 2 == 0) {
+                                cell.setAttribute("bgcolor", "red");
+                                circle = generatePieceDOM("yellow", true);
+                                playerPieces.push({VPos: i, HPos: j, DOM: circle, isKing: false});
+                                grid[i][j].Type = "player";
+                                grid[i][j].DOM = circle;
+                                cell.appendChild(circle);
+                            } else {
+                                cell.setAttribute("bgcolor", "black");
+                            }
+                        } else if (i >= gridSize - linesOfPiecesPerPlayer) {
+                            if (i % 2 != 0) {
+                                cell.setAttribute("bgcolor", "red");
+                                circle = generatePieceDOM("yellow", true);
+                                playerPieces.push({VPos: i, HPos: j, DOM: circle, isKing: false});
+                                grid[i][j].Type = "player";
+                                grid[i][j].DOM = circle;
+                                cell.appendChild(circle);
+                            } else {
+                                cell.setAttribute("bgcolor", "black");
+                            }
+                        } else if (j % 2 == 0) {
+                            if (i % 2 == 0) {
+                                cell.setAttribute("bgcolor", "red");
+                            } else {
+                                cell.setAttribute("bgcolor", "black");
+                            }
+                        } else {
+                            if (i % 2 != 0) {
+                                cell.setAttribute("bgcolor", "red");
+                            } else {
+                                cell.setAttribute("bgcolor", "black");
+                            }
+                        }
+                        row.appendChild(cell);
+                    }
+                }
+            }
+
+            function pieceLogic(pieceSelected) {
+                removeSelectionHelpers();
+
+                var playerPiece;
+                var playerPieceIndex;
+                var leapExists = false;
+                var VPos;
+                var HPos;
+                var isKing;
+
+                for (i = 0; i < playerPieces.length; i++) {
+                    if (playerPieces[i].DOM == pieceSelected) {
+                        playerPiece = playerPieces[i];
+                        VPos = playerPieces[i].VPos;
+                        HPos = playerPieces[i].HPos;
+                        isKing = playerPieces[i].isKing;
+                        playerPieceIndex = i;
+                        break;
+                    }
+                }
+
+                if (forceJump) {
+                    leapExists = checkIfLeapExists(true);
+                }
+
+                if (forceJump && leapExists) {
+                    placeSelectionHelpers(VPos, HPos, false, []);
+                } else {
+                    placeSelectionHelpers(VPos, HPos, true, []);
+                }
+
+                updateGrid();
+
+                function placeSelectionHelpers(VPos, HPos, closeCheck, piecesToRemove) {
+                    if (!(VPos - 1 < 0) && !(HPos - 1 < 0) && closeCheck) { // Check close left;
+                        if (grid[VPos - 1][HPos - 1].Type == null) {
+                            ring = generateRing();
+                            grid[VPos - 1][HPos - 1].DOM = ring;
+                            selectionHelpers.push({DOM: ring, VPos: VPos - 1, HPos: HPos - 1, piecesToRemove: []})
+                        }
+                    }
+                    if (!(VPos - 2 < 0) && !(HPos - 2 < 0)) { // Check leap left;
+                        if (grid[VPos - 2][HPos - 2].Type == null && grid[VPos - 1][HPos - 1].Type == "computer") {
+
+                            piecesToRemove.push({VPos: VPos - 1, HPos: HPos - 1});
+
+                            ring = generateRing();
+                            grid[VPos - 2][HPos - 2].DOM = ring;
+                            selectionHelpers.push({DOM: ring, VPos: VPos - 2, HPos: HPos - 2, piecesToRemove: piecesToRemove})
+                            placeSelectionHelpers(VPos - 2, HPos - 2, false, piecesToRemove);
+                        }
+                    }
+                    if (!(VPos - 1 < 0) && !(HPos + 1 >= grid.length) && closeCheck) { // Check close left;
+                        if (grid[VPos - 1][HPos + 1].Type == null) {
+                            ring = generateRing();
+                            grid[VPos - 1][HPos + 1].DOM = ring;
+                            selectionHelpers.push({DOM: ring, VPos: VPos - 1, HPos: HPos + 1, piecesToRemove: []})
+                        }
+                    }
+                    if (!(VPos - 2 < 0) && !(HPos + 2 >= grid.length)) { // Check leap right;
+                        if (grid[VPos - 2][HPos + 2].Type == null && grid[VPos - 1][HPos + 1].Type == "computer") {
+
+                            piecesToRemove.push({VPos: VPos - 1, HPos: HPos + 1});
+
+                            ring = generateRing();
+                            grid[VPos - 2][HPos + 2].DOM = ring;
+                            selectionHelpers.push({DOM: ring, VPos: VPos - 2, HPos: HPos + 2, piecesToRemove: piecesToRemove})
+                            placeSelectionHelpers(VPos - 2, HPos + 2, false, piecesToRemove);
+                        }
+                    }
+                    if (isKing) {
+                        if (!(VPos + 1 < 0) && !(HPos - 1 < 0) && closeCheck) { // Check close left;
+                            if (grid[VPos + 1][HPos - 1].Type == null) {
+                                ring = generateRing();
+                                grid[VPos + 1][HPos - 1].DOM = ring;
+                                selectionHelpers.push({DOM: ring, VPos: VPos + 1, HPos: HPos - 1, piecesToRemove: []})
+                            }
+                        }
+                        if (!(VPos + 2 < 0) && !(HPos - 2 < 0) && !(VPos + 2 > grid.length)) { // Check leap left;
+                            if (grid[VPos + 2][HPos - 2].Type == null && grid[VPos + 1][HPos - 1].Type == "computer") {
+
+                                piecesToRemove.push({VPos: VPos + 1, HPos: HPos - 1});
+
+                                ring = generateRing();
+                                grid[VPos + 2][HPos - 2].DOM = ring;
+                                selectionHelpers.push({DOM: ring, VPos: VPos + 2, HPos: HPos - 2, piecesToRemove: piecesToRemove})
+                                placeSelectionHelpers(VPos + 2, HPos - 2, false, piecesToRemove);
+                            }
+                        }
+                        if (!(VPos + 1 < 0) && !(HPos + 1 >= grid.length) && closeCheck) { // Check close left;
+                            if (grid[VPos + 1][HPos + 1].Type == null) {
+                                ring = generateRing();
+                                grid[VPos + 1][HPos + 1].DOM = ring;
+                                selectionHelpers.push({DOM: ring, VPos: VPos + 1, HPos: HPos + 1, piecesToRemove: []})
+                            }
+                        }
+                        if (!(VPos + 2 < 0) && !(HPos + 2 >= grid.length)) { // Check leap right;
+                            if (grid[VPos + 2][HPos + 2].Type == null && grid[VPos + 1][HPos + 1].Type == "computer") {
+
+                                piecesToRemove.push({VPos: VPos + 1, HPos: HPos + 1});
+
+                                ring = generateRing();
+                                grid[VPos + 2][HPos + 2].DOM = ring;
+                                selectionHelpers.push({DOM: ring, VPos: VPos + 2, HPos: HPos + 2, piecesToRemove: piecesToRemove})
+                                placeSelectionHelpers(VPos + 2, HPos + 2, false, piecesToRemove);
+                            }
+                        }
+                    }
+                }
+
+                function confirmSelection(selectionHelper) {
+
+                    var ringVPos;
+                    var ringHPos;
+                    var piecesToRemove = [];
+
+                    for (i = 0; i < selectionHelpers.length; i++) {
+                        if (selectionHelper == selectionHelpers[i].DOM) {
+                            ringVPos = selectionHelpers[i].VPos;
+                            ringHPos = selectionHelpers[i].HPos;
+                            piecesToRemove = selectionHelpers[i].piecesToRemove;
+                            selectionHelpers.splice(i, 1);
+                            break;
+                        }
+                    }
+
+                    for (i = 0; i < piecesToRemove.length; i++) {
+
+                        console.log(piecesToRemove[i].VPos);
+                        console.log(piecesToRemove[i].HPos);
+
+                        console.log(grid[piecesToRemove[i].VPos][piecesToRemove[i].HPos]);
+
+
+                        grid[piecesToRemove[i].VPos][piecesToRemove[i].HPos].DOM = null;
+                        grid[piecesToRemove[i].VPos][piecesToRemove[i].HPos].Type = null;
+
+                        for (j = 0; j < computerPieces.length; j++) {
+                            if (computerPieces[j].VPos == piecesToRemove[i].VPos && computerPieces[j].HPos == piecesToRemove[i].HPos) {
+                                computerPieces.splice(j, 1);
+                                console.log("deleted");
+                            }
+                        }
+
+                    }
+                    var newCircle = generatePieceDOM("yellow", true);
+
+                    grid[VPos][HPos].DOM = null;
+                    grid[VPos][HPos].Type = null;
+                    grid[ringVPos][ringHPos].DOM = newCircle
+                    grid[ringVPos][ringHPos].Type = "player";
+                    playerPieces[playerPieceIndex].VPos = ringVPos;
+                    playerPieces[playerPieceIndex].HPos = ringHPos;
+                    playerPieces[playerPieceIndex].DOM = newCircle;
+
+                    grid[ringVPos][ringHPos].isKing = grid[VPos][HPos].isKing
+
+                    if (ringVPos == 0) {
+                        playerPieces[playerPieceIndex].isKing = true;
+                        grid[ringVPos][ringHPos].isKing = true;
+                    }
+                    
+                    removeSelectionHelpers();
+                    updateGrid();
+
+                    playerTurn = false;
+                    simRound();
+                }
+
+                function generateRing() {
+                    var ring = document.createElement("div"); // CREATE A BLUE RING
+                    ring.style.borderRadius = "50%";
+                    ring.style.border = "2px solid aqua";
+                    ring.style.height = "50px";
+                    ring.style.width = "50px";
+                    ring.style.margin = "0 auto";
+                    ring.id = "selectionHelper";
+                    ring.style.cursor = 'pointer';
+
+                    ring.onclick = function() {
+                        return confirmSelection(this);
+                    };
+
+                    return ring
+                }
+
+                function removeSelectionHelpers() {
+                    for (i = 0; i < selectionHelpers.length; i++) {
+                        grid[selectionHelpers[i].VPos][selectionHelpers[i].HPos].DOM = null;
+                    }
+                    selectionHelpers = [];
+                }
+            }
+
+            function checkIfLeapExists(isPlayer) {
+
+                var vertDir;
+                var opponentPieceType;
+                var pieceArray;
+
+                if (isPlayer) {
+                    vertDir = -1;
+                    opponentPieceType = "computer";
+                    pieceArray = playerPieces;
+                } else {
+                    vertDir = 1;
+                    opponentPieceType = "player";
+                    pieceArray = computerPieces;
+                }
+
+                for (i = 0; i < pieceArray.length; i++) {
+
+                    VPos = pieceArray[i].VPos;
+                    HPos = pieceArray[i].HPos;
+
+                    if (!(VPos + (vertDir * 2) < 0) && !(HPos - 2 < 0) && !(VPos + (vertDir * 2) >= grid.length)) { // Check leap left;
+                        if (grid[VPos + (vertDir * 2)][HPos - 2].Type == null && grid[VPos + vertDir][HPos - 1].Type == opponentPieceType) {
+                            return true;
+                        }
+                    }
+                    if (!(VPos + (vertDir * 2) < 0) && !(HPos + 2 >= grid.length) && !(VPos + (vertDir * 2) >= grid.length)) { // Check leap right;
+                        if (grid[VPos + (vertDir * 2)][HPos + 2].Type == null && grid[VPos + vertDir][HPos + 1].Type == opponentPieceType) {
+                            return true;
+                        }
+                    }
+                    if (pieceArray[i].isKing) {
+                        if (!(VPos + ((vertDir / -1) * 2) < 0) && !(HPos - 2 < 0) && !(VPos + (vertDir * 2) >= grid.length)) { // Check leap left;
+                            if (grid[VPos + ((vertDir / -1) * 2)][HPos - 2].Type == null && grid[VPos + (vertDir / -1)][HPos - 1].Type == opponentPieceType) {
+                                return true;
+                            }
+                        }
+                        if (!(VPos + ((vertDir / -1) * 2) < 0) && !(HPos + 2 >= grid.length) && !(VPos + (vertDir * 2) >= grid.length)) { // Check leap right;
+                            if (grid[VPos + ((vertDir / -1) * 2)][HPos + 2].Type == null && grid[VPos + (vertDir / -1)][HPos + 1].Type == opponentPieceType) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                return false;
+            }
+
+            function simRound() {
+                if (!playerTurn) {
+
+
+                    setTimeout(simComputerRound, 1000);
+
+                    playerTurn = true;
+
+                }
+
+                round++;
+            }
+
+            var moves = [];
+
+            function simComputerRound() {
+
+                moveablePieces = [];
+                var leapExists = false;
+
+                if (forceJump) {
+                    leapExists = checkIfLeapExists(false);
+                }
+
+                for (i = 0; i < computerPieces.length; i++) {
+                    var avaliableMoves = getMoves(grid, computerPieces[i].VPos, computerPieces[i].HPos, !leapExists);
+                    if (avaliableMoves.length > 0) {
+                        moveablePieces.push({piece: computerPieces[i], avaliableMoves: avaliableMoves});
+                    }
+                }
+
+                for (i = 0 ; i < moveablePieces.length; i++) {
+                    for (j = 0; j < moveablePieces[i].avaliableMoves.length; j++) {
+                        if (moveablePieces[i].avaliableMoves[j].jump) {
+                            moves.push({piece: moveablePieces[i].piece, move: moveablePieces[i].avaliableMoves[j]});
+                            console.log("jumpfound");
+                        }
+                    }
+                }
+
+                if (moves.length == 0) {
+                    for (i = 0 ; i < moveablePieces.length; i++) {
+                        for (j = 0; j < moveablePieces[i].avaliableMoves.length; j++) {
+                            moves.push({piece: moveablePieces[i].piece, move: moveablePieces[i].avaliableMoves[j]});
+                        }
+                    }
+                }
+
+                var rand = decideMove();
+
+                newOpponentPiece = generatePieceDOM("blue", false);;
+
+                grid[moves[rand].piece.VPos][moves[rand].piece.HPos].DOM = null;
+                grid[moves[rand].piece.VPos][moves[rand].piece.HPos].Type = null;
+                grid[moves[rand].move.moveToVPos][moves[rand].move.moveToHPos].DOM = newOpponentPiece
+                grid[moves[rand].move.moveToVPos][moves[rand].move.moveToHPos].Type = "computer";
+
+
+                grid[moves[rand].move.moveToVPos][moves[rand].move.moveToHPos].isKing = grid[moves[rand].piece.VPos][moves[rand].piece.HPos].isKing;
+
+                if (moves[rand].move.moveToVPos == gridSize - 1) {
+                    grid[moves[rand].move.moveToVPos][moves[rand].move.moveToHPos].isKing = true;
+                }
+
+                if (moves[rand].move.removeVPos != null && moves[rand].move.removeHPos != null) {
+
+                    for (i = 0; i < playerPieces.length; i++) {
+                        if (moves[rand].move.removeVPos == playerPieces[i].VPos && moves[rand].move.removeHPos == playerPieces[i].HPos) {
+                            playerPieces.splice(i, 1);
+                        }
+                    }
+
+                    grid[moves[rand].move.removeVPos][moves[rand].move.removeHPos].DOM = null;
+                    grid[moves[rand].move.removeVPos][moves[rand].move.removeHPos].Type = null;
+                }
+
+                for (i = 0; i < computerPieces.length; i++) {
+                    if (moves[rand].piece == computerPieces[i]) {
+                        computerPieces[i].VPos = moves[rand].move.moveToVPos;
+                        computerPieces[i].HPos = moves[rand].move.moveToHPos;
+                        computerPieces[i].DOM = newOpponentPiece;
+                        if (moves[rand].move.moveToVPos == gridSize - 1) {
+                            computerPieces[i].isKing = true;
+                        }
+                    }
+                }
+
+                moves = [];
+                updateGrid();
+            }
+
+            function decideMove() {
+
+                if (difficulty == 1) {
+                    return Math.floor(Math.random() * moves.length);
+                } else if (difficulty == 2) {
+
+                    if (moves[0].move.jump == false) {
+                        return Math.floor(Math.random() * moves.length);
+                    }
+
+                    if (moves.length == 1) {
+                        return 0;
+                    }
+
+                    goodMoves = [];
+
+                    for (i = 0; i < moves.length; i++) {
+
+                        moveToHPos = moves[i].move.moveToHPos;
+                        moveToVPos = moves[i].move.moveToVPos;
+
+                        if (grid[moveToVPos + 1][moveToHPos - 1].Type == null && grid[moveToVPos + 1][moveToHPos + 1].Type == null) {
+                            goodMoves.push(moves[i]);
+                        }
+
+                        if (goodMoves.length == 0) {
+                            return Math.floor(Math.random() * moves.length);
+                        } else {
+                            var randGood = Math.floor(Math.random() * goodMoves.length);
+
+                            return moves.indexOf(goodMoves[randGood]);
+                        }
+                    }
+
+                } else if (difficulty == 3) {
+
+                }
+            }
+
+            function getMoves(passedGrid, VPos, HPos, checkClose) {
+
+                var avaliableMoves = [];
+
+                var opponentPieceType;
+                var vertDir;
+
+                if (passedGrid[VPos][HPos].Type == "player") {
+                    vertDir = -1;
+                    opponentPieceType = "computer";
+                } else {
+                    vertDir = 1;
+                    opponentPieceType = "player";
+                }
+
+                if (!(VPos + vertDir < 0) && !(HPos - 1 < 0) && checkClose && !(VPos + vertDir >= grid.length)) { // Check close left;
+                    if (passedGrid[VPos + vertDir][HPos - 1].Type == null) {
+                        avaliableMoves.push({jump: false, moveToVPos: VPos + vertDir, moveToHPos: HPos - 1, removeVPos: null, removeHPos: null});
+                    }
+                }
+                if (!(VPos + (vertDir * 2) < 0) && !(HPos - 2 < 0) && !(VPos + (vertDir * 2) >= grid.length)) { // Check leap left;
+                    if (passedGrid[VPos + (vertDir * 2)][HPos - 2].Type == null && passedGrid[VPos + vertDir][HPos - 1].Type == opponentPieceType) {
+                        avaliableMoves.push({jump: true, moveToVPos: VPos + (vertDir * 2), moveToHPos: HPos - 2, removeVPos: VPos + vertDir, removeHPos: HPos - 1});
+                    }
+                }
+                if (!(VPos + vertDir < 0) && !(HPos + 1 >= grid.length) && checkClose && !(VPos + vertDir >= grid.length)) { // Check close left;
+                    if (passedGrid[VPos + vertDir][HPos + 1].Type == null) {
+                        avaliableMoves.push({jump: false, moveToVPos: VPos + vertDir, moveToHPos: HPos + 1, removeVPos: null, removeHPos: null});
+                    }
+                }
+                if (!(VPos + (vertDir * 2) < 0) && !(HPos + 2 >= grid.length) && !(VPos + (vertDir * 2) >= grid.length)) { // Check leap right;
+                    if (passedGrid[VPos + (vertDir * 2)][HPos + 2].Type == null && passedGrid[VPos + vertDir][HPos + 1].Type == opponentPieceType) {
+                        avaliableMoves.push({jump: true, moveToVPos: VPos + (vertDir * 2), moveToHPos: HPos + 2, removeVPos: VPos + vertDir, removeHPos: HPos + 1});
+                    }
+                }
+
+                if (passedGrid[VPos][HPos].isKing) {
+
+                    console.log("Piece is king");
+
+                    if (!(VPos + (vertDir / -1) < 0) && !(HPos - 1 < 0) && checkClose && !(VPos + vertDir >= grid.length)) { // Check close left;
+                        if (passedGrid[VPos + (vertDir / -1)][HPos - 1].Type == null) {
+                            avaliableMoves.push({jump: false, moveToVPos: VPos + (vertDir / -1), moveToHPos: HPos - 1, removeVPos: null, removeHPos: null});
+                        }
+                    }
+                    if (!(VPos + ((vertDir / -1) * 2) < 0) && !(HPos - 2 < 0) && !(VPos + (vertDir * 2) >= grid.length)) { // Check leap left;
+                        if (passedGrid[VPos + ((vertDir / -1) * 2)][HPos - 2].Type == null && passedGrid[VPos + (vertDir / -1)][HPos - 1].Type == opponentPieceType) {
+                            avaliableMoves.push({jump: true, moveToVPos: VPos + ((vertDir / -1) * 2), moveToHPos: HPos - 2, removeVPos: VPos + (vertDir / -1), removeHPos: HPos - 1});
+                        }
+                    }
+                    if (!(VPos + (vertDir / -1) < 0) && !(HPos + 1 >= grid.length) && checkClose && !(VPos + vertDir >= grid.length)) { // Check close left;
+                        if (passedGrid[VPos + (vertDir / -1)][HPos + 1].Type == null) {
+                            avaliableMoves.push({jump: false, moveToVPos: VPos + (vertDir / -1), moveToHPos: HPos + 1, removeVPos: null, removeHPos: null});
+                        }
+                    }
+                    if (!(VPos + ((vertDir / -1) * 2) < 0) && !(HPos + 2 >= grid.length) && !(VPos + (vertDir * 2) >= grid.length)) { // Check leap right;
+                        if (passedGrid[VPos + ((vertDir / -1) * 2)][HPos + 2].Type == null && passedGrid[VPos + (vertDir / -1)][HPos + 1].Type == opponentPieceType) {
+                            avaliableMoves.push({jump: true, moveToVPos: VPos + ((vertDir / -1) * 2), moveToHPos: HPos + 2, removeVPos: VPos + (vertDir / -1), removeHPos: HPos + 1});
+                        }
+                    }
+                }
+                return avaliableMoves;
+            }
+
+            function generatePieceDOM(colour, player) {
+                var circle = document.createElement("div");
+                circle.style.borderRadius = "50%";
+                circle.style.height = "50px";
+                circle.style.width = "50px";
+                circle.style.margin = "0 auto";
+                circle.style.backgroundColor = colour;
+                if (player) {
+                    circle.onclick = function() {
+                        if (playerTurn) {
+                            return pieceLogic(this);
+                        }
+                    }
+                }
+                return circle;
+            }
+
+            function updateGrid() {
+                console.log("Grid Updated");
+                var rows = gameTable.children;
+                for (i = 0; i < rows.length; i++) {
+                    var cols = rows[i].children;
+                    for (j = 0; j < cols.length; j++) {
+                        if (grid[i][j].DOM != null) {
+
+                            if (grid[i][j].isKing) {
+                                grid[i][j].DOM.style.border = "3px solid aqua";
+                                grid[i][j].DOM.style.height = "44px";
+                                grid[i][j].DOM.style.width = "44px";
+                            }
+
+                            cols[j].innerHTML = '';
+                            cols[j].appendChild(grid[i][j].DOM);
+                        } else {
+                            cols[j].innerHTML = '';
+                        }
+                    }
+                }
+            }
+        </script>
+    </body>
+</html>

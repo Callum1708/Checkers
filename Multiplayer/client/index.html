@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html>
+    <head>
+
+        <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css" integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO" crossorigin="anonymous">
+        <!--<link rel="stylesheet" href="stylesheet.css" type="text/css"/>-->
+        <link rel="stylesheet" href="/client/stylesheet.css" type="text/css"/>
+        <title>Project Server Testing</title>
+
+    </head>
+    <body>
+        <div class="sideCol leftCol">
+            <div class="infoContainer">
+                <div class="mainInfoContainer">
+                    <div class="buttonsContainer">
+                        <input class="buttons" value="Join Game" type="button" onclick="attemptToJoinRoom()" />
+                        <input class="buttons" value="Host Game" type="button" onclick="socket.emit('createRoom')" />
+                        <input class="buttons" value="Leave Game" type="button" onclick="leaveRoom()" />
+                    </div>
+                    <div class="infoBackground">
+                        <div class="currentRoomContainer">
+                            <h2>Current Room:</h2>
+                            <h3><b ID="room">Lobby</b></h3>
+                        </div>
+                    </div>
+                    <div class="infoBackground">
+
+                        <h2 class="names" ID="username">You</h2>
+                        <h2>vs</h2>
+                        <h2 class="names" ID="opponentName"></h2>
+
+                    </div>
+
+                    <div class="infoBackground" ID="turnNotifyContainer">
+                        <h2 ID="turnNotify">It is <span ID="turnName">Your</span> turn!</h2>
+                    </div>
+
+                    <div class="infoBackground" ID="forceJumpContainer">
+                        <h2>Force Jumps?</h2>
+                        <div ID="switchContainer">
+                            <label class="switch">
+                                <input ID="forceJump" type="checkbox" onchange="setForceJump()"/>
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+        <div class="sideCol rightCol">
+            <form ID="chatForm" action="">
+                <textarea readonly ID="mainChat" ></textarea>
+                <div class="chatFormContainer">
+                    <input ID="inputField" type="text" autocomplete="off" autofocus="autofocus">
+                    <input ID="submitButton" type="submit" value="Submit">
+                </div>
+            </form>
+        </div>
+        <div class="tableCol">
+            <table id="mainTable"></table>
+        </div>
+
+        <script src="https://cdn.socket.io/socket.io-1.4.5.js"></script>
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.3/umd/popper.min.js" integrity="sha384-ZMP7rVo3mIykV+2+9J3UJ46jBk0WLaUAdn689aCwoqbBJiSnjAK/l8WvCWPIPm49" crossorigin="anonymous"></script>
+        <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/js/bootstrap.min.js" integrity="sha384-ChfqqxuZUCnJSK3+MXmPNIyE6ZbWh2IMqE241rYiqJxyMiZ6OW/JmZQ5stwEULTy" crossorigin="anonymous"></script>
+        <script>
+
+            var socket = io(); // Generate a socket for communication with the server.
+            var chatBox = $('#mainChat'); //Chat box.
+            var name; // Client's name.
+            var gridSize = 8; // Size of the grid.
+            var currentRoom; // The room the client is currently in.
+            var roomHost; // Boolean value for representing wheather the client in the host of the current room.
+            var gridState = []; // The state of the grid.
+            var gameReady = false; // Boolean value for if the game is ready to be played.
+            var playersTurn; // Boolean value for if its the clients turn.
+            var selectionIndexes = []; // array containing the selectionHelper objects currently on the grid.
+            var playerIndexes = []; // array containing the objects representing the pieces of the client.
+            var opponentName; // String representing the name of the opponent player.
+            var forceJump;
+
+            // MAIN EXECUTION -
+
+            gameTable = document.getElementById('mainTable'); // HTML DOM element for the table.
+
+            connect(); // Execute connection sequence function.
+
+            for (i = 0; i < gridSize; i++) {
+                var row = document.createElement("tr");
+                gameTable.appendChild(row);
+                gridState[i] = [];
+                for (j = 0; j < gridSize; j++) {
+                    gridState[i][j] = {
+                        VPos: i,
+                        HPos: j,
+                        DOM: null,
+                        Type: null,
+                        isKing: false,
+                    };
+                    var col = document.createElement("td");
+                    if (i % 2 == 0) {
+                        if (j % 2 == 0) {
+                            col.setAttribute("bgcolor", "red");
+                        } else {
+                            col.setAttribute("bgcolor", "black");
+                        }
+                    } else {
+                        if (j % 2 != 0) {
+                            col.setAttribute("bgcolor", "red");
+                        } else {
+                            col.setAttribute("bgcolor", "black");
+                        }
+                    }
+                    row.appendChild(col);
+                }
+            }
+
+            // MAIN FUNCTIONS -
+
+            /*
+                connect() Function.
+
+                Connects the client to the game server.
+                For this function to fully complete and have the client connect to the server it requires
+                that the user submit a username to the server.
+
+                This username will be associated with the socket that is used for communication between the client
+                and the server.
+
+            */
+            function connect() {
+                name = prompt("Please enter a username: "); // Ask for name.
+                while (name == null || name == "") { // validate
+                    name = prompt("Please enter a username: "); // ask again if not valid.
+                }
+                socket.emit('nameSubmitted', { // Send the name to the server.
+                    name: name
+                });
+                var usernameField = document.getElementById('username'); // Set the name.
+                usernameField.innerHTML = name;
+            }
+
+            function setForceJump() {
+                console.log(document.getElementById("forceJump").checked);
+                socket.emit('setForceJump');
+            }
+
+            /*
+                attemptToJoinRoom() Function
+
+                Attempts to connect the client to a game room on the server.
+                For this function to fully complete and have the client join the room they will first need to
+                submit the code that is associated with the room they want to join.
+
+            */
+
+            function attemptToJoinRoom() {
+                var room = prompt("Game Room Code: "); // Ask for room code.
+                while (room == "") { // If no room code entered.
+                    room = prompt("Please enter a game room code: "); // ask again.
+                }
+                if (room == null) { // Else if null (e.g. dialog box closed).
+                    return; // Abort function.
+                }
+                socket.emit('joinRoom', room); // Submit request to the server with the room code submitted by the client.
+            }
+
+            /*
+                leaveRoom() Function.
+
+                Removes the client from the game room on the server.
+
+            */
+
+            function leaveRoom() {
+                cells = gameTable.getElementsByTagName('td');
+                for (i = 0; i < cells.length; i++) {
+                    cells[i].innerHTML = '';
+                }
+                socket.emit('leaveRoom', currentRoom);
+            }
+
+            // ON SERVER REQUEST FUNCTIONS.
+
+            /*
+                disconnect Function.
+
+                This function will be executed when the client loses connection with the server.
+                The client will be alerted about the loss of connection.
+
+                The client will then be repeatibily asked if they want to attempt to reconnect to the server until
+                a connection is made.
+
+            */
+
+            socket.on('disconnect', function() {
+                alert("ERROR: Connection with server lost."); // Alert user of loss of connection
+                name = null; // reset name var.
+                reconnect();
+
+                function reconnect() {
+                    if (confirm("Attempt to reconnect?")) {
+                        connect();
+                    } else {
+                        reconnect();
+                    }
+                }
+            })
+
+            socket.on('setForceJumpSwitch', function(data) {
+                document.getElementById("forceJump").checked = data.state;
+                if (data.state) {
+                    forceJump = true;
+                } else {
+                    forceJump = false;
+                }
+            })
+
+            socket.on('nameTaken', function() {
+                name = prompt("username '" + name + "' was taken, please enter another:");
+                connect();
+            })
+
+            socket.on('notify', function(data) {
+                if (data.alert) {
+                    alert(data.msg);
+                    if (data.msg == "This room is full!") {
+                        attemptToJoinRoom();
+                    }
+                } else {
+                    chatBox.val(chatBox.val() + "\n" + data.msg);
+                }
+            })
+
+            socket.on('messageRecieved', function(data) {
+                if (data.name == name) {
+                    chatBox.val(chatBox.val() + "\nYou said: " + data.msg);
+                } else {
+                    chatBox.val(chatBox.val() + "\n" + data.name + " said: " + data.msg);
+                }
+                chatBox.scrollTop(chatBox[0].scrollHeight);
+            })
+
+            socket.on('setRoom', function(data) {
+                var roomText = document.getElementById('room');
+                roomText.innerHTML = data.room;
+                if (data.room != "Lobby") {
+                    chatBox.val(chatBox.val() + "\nYou have entered room: '" + data.room + "'.");
+                    document.getElementById('turnNotifyContainer').style.display = "block";
+                    document.getElementById('forceJumpContainer').style.display = "block";
+                } else if (data.room == "Lobby") {
+                    document.getElementById('turnNotifyContainer').style.display = "none";
+                    document.getElementById('forceJumpContainer').style.display = "none";
+                }
+                currentRoom = data.room;
+                if (data.opponentName != null) {
+                    document.getElementById('opponentName').innerHTML = data.opponentName;
+                    document.getElementById('turnName').innerHTML = data.opponentName + "'s ";
+                    playersTurn = false;
+                    gameReady = true;
+                    opponentName = data.opponentName;
+                }
+                roomHost = data.isHost
+            })
+
+            socket.on('setOpponateName', function(data) {
+                if (name != data.opponentName) {
+                    document.getElementById('opponentName').innerHTML = data.opponentName;
+                    document.getElementById('turnNotifyContainer').style.display = "block";
+                    document.getElementById('forceJumpContainer').style.display = "block";
+                    document.getElementById('turnName').innerHTML = "your";
+                    gameReady = true;
+                    playersTurn = true;
+                    roomHost = true;
+                    opponentName = data.opponentName;
+                }
+            })
+
+            $('#chatForm').submit(function(event){
+                if ($("#inputField").val() == "") {
+                    alert("Can't send empty message");
+                } else {
+                    socket.emit('chatMessage', $("#inputField").val());
+                }
+                $("#inputField").val('');
+                return false;
+            });
+
+            socket.on('updateGrid', function(data) {
+
+                playerIndexes = [];
+
+                if (!data.firstLoad) {
+                    playersTurn = !playersTurn
+                }
+
+                if (playersTurn) {
+                    document.getElementById('turnName').innerHTML = "your";
+                } else {
+                    document.getElementById('turnName').innerHTML = opponentName + "'s ";
+                }
+
+                var rows = gameTable.children;
+
+                for (i = 0; i < gridSize; i++) {
+                    var cols = rows[i].children;
+                    for (j = 0; j < gridSize; j++) {
+                        cols[j].innerHTML = "";
+                        gridState[i][j].Type = null;
+                        gridState[i][j].DOM = null;
+                    }
+                }
+
+                for (i = 0; i < data.pieces.length; i++) {
+                    gridState[data.pieces[i].VPos][data.pieces[i].HPos].Type = data.pieces[i].Type;
+                    gridState[data.pieces[i].VPos][data.pieces[i].HPos].isKing = data.pieces[i].isKing;
+                }
+
+                var rows = gameTable.children;
+
+                for (i = 0; i < rows.length; i++) {
+                    var cols = rows[i].children;
+                    for (j = 0; j < cols.length; j++) {
+                        if (gridState[i][j].Type == "player1") {
+
+                            var circle = generateCircle();
+                            circle.style.backgroundColor = "blue";
+
+                            if (gridState[i][j].isKing) {
+                                circle.style.border = "3px solid aqua";
+                                circle.style.height = "44px";
+                                circle.style.width = "44px";
+                            }
+
+                            if (roomHost) {
+                                circle.onclick = function() {
+                                    if (!gameReady) {
+                                        alert("The game is not ready to be played! Wait for your opponent to join the game room.");
+                                    } else if (!playersTurn) {
+                                        alert("It is not your turn! Wait for your opponent to make a move.");
+                                    } else {
+                                        return pieceLogic(this);
+                                    }
+                                };
+                                playerIndexes.push({
+                                    VPos: i,
+                                    HPos: j,
+                                    DOM: circle,
+                                    isKing: gridState[i][j].isKing
+                                })
+                            }
+                            gridState[i][j].DOM = circle;
+                            cols[j].appendChild(circle);
+                        } else if (gridState[i][j].Type == "player2") {
+
+                            var circle = generateCircle()
+                            circle.style.backgroundColor = "yellow";
+
+                            if (gridState[i][j].isKing) {
+                                circle.style.border = "3px solid aqua";
+                                circle.style.height = "44px";
+                                circle.style.width = "44px";
+                            }
+
+                            if (!roomHost) {
+                                circle.onclick = function() {
+                                    if (!gameReady) {
+                                        alert("The game is not ready to be played! Wait for your opponent to join the game room.");
+                                    } else if (!playersTurn) {
+                                        alert("It is not your turn! Wait for your opponent to make a move.");
+                                    } else {
+                                        return pieceLogic(this);
+                                    }
+                                };
+                                playerIndexes.push({
+                                    VPos: i,
+                                    HPos: j,
+                                    DOM: circle,
+                                    isKing: gridState[i][j].isKing
+                                })
+                            }
+                            gridState[i][j].DOM = circle;
+                            cols[j].appendChild(circle);
+                        }
+                    }
+                }
+                function generateCircle() {
+                    var circle = document.createElement("div");
+                    circle.style.borderRadius = "50%";
+                    circle.style.height = "50px";
+                    circle.style.width = "50px";
+                    circle.style.margin = "0 auto";
+
+                    return circle;
+                }
+            })
+
+            function removeSelectionHelpers() {
+                for (i = 0; i < selectionIndexes.length; i++) {
+                    gridState[selectionIndexes[i].VPos][selectionIndexes[i].HPos].DOM = null;
+                }
+                selectionIndexes = [];
+            }
+
+            function pieceLogic(pieceSelected) {
+
+                removeSelectionHelpers();
+
+                var originVPos;
+                var originHPos;
+                var pieceIndex;
+                var opponentType;
+                var isKing;
+                var leapExists = false;
+
+                var vertDir; // The vertical Direction in which the current player is playing represented by an interger. E.g. +1 is top down and -1 is bottom up.
+
+                if (roomHost) { // If the player is playing bottom up.
+                    vertDir = -1; // set the correct values.
+                } else { // Else the player is playing top down.
+                    vertDir = 1; // set the correct values.
+                }
+
+                for (i = 0; i < playerIndexes.length; i++) {
+                    if (playerIndexes[i].DOM == pieceSelected) {
+                        originVPos = playerIndexes[i].VPos;
+                        originHPos = playerIndexes[i].HPos;
+                        pieceIndex = i;
+                        isKing = playerIndexes[i].isKing;
+                    }
+                }
+
+                if (roomHost) {
+                    opponentType = "player2";
+                } else {
+                    opponentType = "player1";
+                }
+
+                if (forceJump) {
+                    leapExists = checkIfLeapExists();
+                }
+
+                if (forceJump && leapExists) {
+                    placeSelectionHelpers(originVPos, originHPos, false, [], []);
+                } else {
+                    placeSelectionHelpers(originVPos, originHPos, true, [], []);
+                }
+
+                updateGrid();
+
+                function placeSelectionHelpers(VPos, HPos, closeCheck, VRoute, HRoute) {
+                    if (!(VPos + vertDir < 0) && !(HPos - 1 < 0) && !(VPos + vertDir >= 8) && closeCheck) { // Check close left;
+                        if (gridState[VPos + vertDir][HPos - 1].Type == null) {
+                            ring = generateRing();
+                            ring.onclick = function() { return validateMove(originVPos, originHPos, (VPos + vertDir), (HPos - 1), false, [], []); };
+                            gridState[VPos + vertDir ][HPos - 1].DOM = ring;
+                            selectionIndexes.push({ DOM: ring, VPos: VPos + vertDir, HPos: HPos - 1 })
+                        }
+                    }
+                    if (!(VPos + (vertDir * 2) < 0) && !(HPos - 2 < 0) && !(VPos + (vertDir * 2) >= 8)) { // Check leap left;
+                        if (gridState[VPos + (vertDir * 2)][HPos - 2].DOM == null && gridState[VPos + vertDir][HPos - 1].Type == opponentType) {
+
+                            VRoute.push(vertDir);
+                            HRoute.push("L");
+
+                            ring = generateRing();
+                            ring.onclick = function() { return validateMove(originVPos, originHPos, (VPos + (vertDir * 2)), (HPos - 2), true, VRoute, HRoute); };
+                            gridState[VPos + (vertDir * 2)][HPos - 2].DOM = ring;
+                            selectionIndexes.push({ DOM: ring, VPos: VPos + (vertDir * 2), HPos: HPos - 2 });
+                            placeSelectionHelpers(VPos + (vertDir * 2), HPos - 2, false, VRoute, HRoute);
+                        }
+                    }
+                    if (!(VPos + vertDir < 0) && !(HPos + 1 >= 8) && !(VPos + vertDir >= 8) && closeCheck) { // Check close left;
+                        if (gridState[VPos + vertDir][HPos + 1].Type == null) {
+                            ring = generateRing();
+                            ring.onclick = function() { return validateMove(originVPos, originHPos, (VPos + vertDir), (HPos + 1), false, [], []); };
+                            gridState[VPos + vertDir ][HPos + 1].DOM = ring;
+                            selectionIndexes.push({ DOM: ring, VPos: VPos + vertDir, HPos: HPos + 1 })
+                        }
+                    }
+                    if (!(VPos + (vertDir * 2) < 0) && !(HPos + 2 >= 8) && !(VPos + (vertDir * 2) >= 8)) { // Check leap right;
+                        if (gridState[VPos + (vertDir * 2)][HPos + 2].DOM == null && gridState[VPos + vertDir][HPos + 1].Type == opponentType) {
+
+                            VRoute.push(vertDir);
+                            HRoute.push("R");
+
+                            ring = generateRing();
+                            ring.onclick = function() { return validateMove(originVPos, originHPos, (VPos + (vertDir * 2)), (HPos + 2), true, VRoute, HRoute); };
+                            gridState[VPos + (vertDir * 2)][HPos + 2].DOM = ring;
+                            selectionIndexes.push({ DOM: ring, VPos: VPos + (vertDir * 2), HPos: HPos + 2 });
+                            placeSelectionHelpers(VPos + (vertDir * 2), HPos + 2, false, VRoute, HRoute);
+                        }
+                    }
+                    if (isKing) {
+                        if (!(VPos + (vertDir / -1) < 0) && !(HPos - 1 < 0) && !(VPos + (vertDir / -1) >= 8) && closeCheck) { // Check close left;
+                            if (gridState[VPos + (vertDir / -1)][HPos - 1].Type == null) {
+                                ring = generateRing();
+                                ring.onclick = function() { return validateMove(originVPos, originHPos, (VPos + (vertDir / -1)), (HPos - 1), false, [], []); };
+                                gridState[VPos + (vertDir / -1)][HPos - 1].DOM = ring;
+                                selectionIndexes.push({ DOM: ring, VPos: VPos + (vertDir / -1), HPos: HPos - 1})
+                            }
+                        }
+                        if (!(VPos + ((vertDir / -1) * 2) < 0) && !(HPos - 2 < 0) && !(VPos + ((vertDir / -1) * 2) >= 8)) { // Check leap left;
+                            if (gridState[VPos + ((vertDir / -1) * 2)][HPos - 2].DOM == null && gridState[VPos + (vertDir / -1)][HPos - 1].Type == opponentType) {
+
+                                VRoute.push(vertDir / -1);
+                                HRoute.push("L");
+
+                                ring = generateRing();
+                                ring.onclick = function() { return validateMove(originVPos, originHPos, (VPos + ((vertDir / -1) * 2)), (HPos - 2), true, VRoute, HRoute); };
+                                gridState[VPos + ((vertDir / -1) * 2)][HPos - 2].DOM = ring;
+                                selectionIndexes.push({ DOM: ring, VPos: VPos + ((vertDir / -1) * 2), HPos: HPos - 2 });
+                                placeSelectionHelpers(VPos + ((vertDir / -1) * 2), HPos - 2, false, VRoute, HRoute);
+                            }
+                        }
+                        if (!(VPos + (vertDir / -1) < 0) && !(HPos + 1 >= 8) && !(VPos + (vertDir / -1) >= 8) && closeCheck) { // Check close left;
+                            if (gridState[VPos + (vertDir / -1)][HPos + 1].Type == null) {
+                                ring = generateRing();
+                                ring.onclick = function() { return validateMove(originVPos, originHPos, (VPos + (vertDir / -1)), (HPos + 1), false, [], []); };
+                                gridState[VPos + (vertDir / -1)][HPos + 1].DOM = ring;
+                                selectionIndexes.push({ DOM: ring, VPos: VPos + (vertDir / -1), HPos: HPos + 1})
+                            }
+                        }
+                        if (!(VPos + ((vertDir / -1) * 2) < 0) && !(HPos + 2 >= 8) && !(VPos + ((vertDir / -1) * 2) >= 8)) { // Check leap right;
+                            if (gridState[VPos + ((vertDir / -1) * 2)][HPos + 2].DOM == null && gridState[VPos + (vertDir / -1)][HPos + 1].Type == opponentType) {
+
+                                VRoute.push(vertDir / -1);
+                                HRoute.push("R");
+
+                                ring = generateRing();
+                                ring.onclick = function() { return validateMove(originVPos, originHPos, (VPos + ((vertDir / -1) * 2)), (HPos + 2), true, VRoute, HRoute); };
+                                gridState[VPos + ((vertDir / -1) * 2)][HPos + 2].DOM = ring;
+                                selectionIndexes.push({ DOM: ring, VPos: VPos + ((vertDir / -1) * 2), HPos: HPos + 2 });
+                                placeSelectionHelpers(VPos + ((vertDir / -1) * 2), HPos + 2, false, VRoute, HRoute);
+                            }
+                        }
+                    }
+                }
+
+                function checkIfLeapExists() {
+                    for (i = 0 ; i < playerIndexes.length; i++) {
+                        if (!(playerIndexes[i].HPos - 2 < 0) && !(playerIndexes[i].VPos + (vertDir * 2) < 0) && !(playerIndexes[i].VPos + (vertDir * 2) >= 8) && !(playerIndexes[i].VPos + (vertDir * 2) < 0)) {
+                            if (gridState[playerIndexes[i].VPos + vertDir][playerIndexes[i].HPos - 1].Type == opponentType && gridState[playerIndexes[i].VPos + (vertDir * 2)][playerIndexes[i].HPos - 2].Type == null) {
+                                return true;
+                            }
+                        }
+                        if (!(playerIndexes[i].HPos + 2 >= gridSize) && !(playerIndexes[i].VPos + (vertDir * 2) < 0) && !(playerIndexes[i].VPos + (vertDir * 2) >= 8) && !(playerIndexes[i].VPos + (vertDir * 2) < 0)) {
+                            if (gridState[playerIndexes[i].VPos + vertDir][playerIndexes[i].HPos + 1].Type == opponentType && gridState[playerIndexes[i].VPos + (vertDir * 2)][playerIndexes[i].HPos + 2].Type == null) {
+                                return true;
+                            }
+                        }
+                        if (playerIndexes[i].isKing) {
+                            if (!(playerIndexes[i].HPos - 2 < 0) && !(playerIndexes[i].VPos + ((vertDir / -1) * 2) < 0) && !(playerIndexes[i].VPos + ((vertDir / -1) * 2) >= 8) && !(playerIndexes[i].VPos + ((vertDir / -1) * 2) < 0)) {
+                                if (gridState[playerIndexes[i].VPos + (vertDir / -1)][playerIndexes[i].HPos - 1].Type == opponentType && gridState[playerIndexes[i].VPos + ((vertDir / -1) * 2)][playerIndexes[i].HPos - 2].Type == null) {
+                                    return true;
+                                }
+                            }
+                            if (!(playerIndexes[i].HPos + 2 >= gridSize) && !(playerIndexes[i].VPos + ((vertDir / -1) * 2) < 0) && !(playerIndexes[i].VPos + ((vertDir / -1) * 2) >= 8) && !(playerIndexes[i].VPos + ((vertDir / -1) * 2) < 0)) {
+                                if (gridState[playerIndexes[i].VPos + (vertDir / -1)][playerIndexes[i].HPos + 1].Type == opponentType && gridState[playerIndexes[i].VPos + ((vertDir / -1) * 2)][playerIndexes[i].HPos + 2].Type == null) {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    return false;
+                }
+            }
+            function validateMove(originVPos, originHPos, moveToVPos, moveToHPos, leap, VRoute, HRoute) {
+                removeSelectionHelpers();
+
+                socket.emit('validateMove', {
+                    originVPos: originVPos,
+                    originHPos: originHPos,
+                    moveToVPos: moveToVPos,
+                    moveToHPos: moveToHPos,
+                    leap: leap,
+                    VRoute: VRoute,
+                    HRoute: HRoute
+                });
+
+            }
+
+            function generateRing() {
+                var ring = document.createElement("div"); // CREATE A BLUE RING
+                ring.style.borderRadius = "50%";
+                ring.style.border = "2px solid aqua";
+                ring.style.height = "50px";
+                ring.style.width = "50px";
+                ring.style.margin = "0 auto";
+                ring.id = "selectionHelper";
+                ring.style.cursor = 'pointer';
+
+                return ring
+            }
+
+            function updateGrid() {
+                console.log("Grid Updated");
+                var rows = gameTable.children;
+                for (i = 0; i < rows.length; i++) {
+                    var cols = rows[i].children;
+                    for (j = 0; j < cols.length; j++) {
+                        if (gridState[i][j].DOM != null) {
+                            cols[j].innerHTML = '';
+                            cols[j].appendChild(gridState[i][j].DOM);
+                        } else {
+                            cols[j].innerHTML = '';
+                        }
+                    }
+                }
+            }
+
+        </script>
+    </body>
+</html>
